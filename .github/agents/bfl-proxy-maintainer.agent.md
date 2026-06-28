@@ -34,7 +34,7 @@ README.md
 
 ## Scope guardrails
 
-This proxy is **text-to-image generation only**. It does NOT support BFL editing, outpainting, inpainting, erasure, deblur, virtual try-on, finetune management, or FLUX Tools endpoints. If an issue requests any of those, **flag it as out of scope and ask for explicit approval before implementing** — do not silently expand scope, but do offer to implement if the user confirms they want to extend the proxy.
+This proxy is **text-to-image generation only**. It does NOT support BFL editing, out-painting, in-painting, erasure, de-blur, virtual try-on, fine-tune management, or FLUX Tools endpoints. If an issue requests any of those, **flag it as out of scope and ask for explicit approval before implementing** — do not silently expand scope, but do offer to implement if the user confirms they want to extend the proxy.
 
 ## Dependency policy
 
@@ -70,7 +70,7 @@ Do NOT proactively bump dependencies when fixing unrelated issues. Only touch `r
 - **402 from BFL** → out of credits; surface as `out_of_credits`.
 - **429 from BFL** → 24 active tasks (6 for kontext-max); surface as `rate_limited`.
 - **Timeout waiting for generation** → `REQUEST_TIMEOUT_SECONDS` / `POLL_INTERVAL_SECONDS`; surface as `timeout` (504).
-- **Image URL 404 in Open WebUI** → `PUBLIC_BASE_URL` not reachable from the user's browser, or `IMAGE_TTL_SECONDS` too short, or `STORE_GENERATED_IMAGES=false` with cleanup removing the file.
+- **Image URL 404 in Open WebUI** → `PUBLIC_BASE_URL` not reachable from the user's browser, or `IMAGE_TTL_SECONDS` too short, or `STORE_GENERATED_IMAGES=false` with clean-up removing the file.
 - **`b64_json` works but `url` doesn't** → check `PUBLIC_BASE_URL` and that the proxy port is exposed/reachable.
 - **Import errors in VS Code** → Pylance picking the wrong interpreter; see `.vscode/settings.json` `python.analysis.extraPaths`.
 
