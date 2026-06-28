@@ -1,0 +1,25 @@
+# Normalize line endings: LF in the repo, native on checkout.
+# This prevents CRLF/LF churn when contributors use Windows.
+* text=auto eol=lf
+
+# Explicitly force LF for source/config files that must not be CRLF
+*.py     text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.txt    text eol=lf
+*.sh     text eol=lf
+*.env    text eol=lf
+Dockerfile text eol=lf
+.gitignore text eol=lf
+.env.example text eol=lf
+
+# Binary files — never normalise
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.webp   binary
+*.ico    binary
+*.pdf    binary

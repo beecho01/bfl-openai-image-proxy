@@ -1,0 +1,16 @@
+services:
+  bfl-openai-image-proxy:
+    build: .
+    container_name: bfl-openai-image-proxy
+    ports:
+      - "8000:8000"
+    environment:
+      BFL_API_KEY: "${BFL_API_KEY}"
+      BFL_BASE_URL: "https://api.eu.bfl.ai"
+      DEFAULT_MODEL: "flux-2-klein-9b-preview"
+      PROXY_API_KEY: "${PROXY_API_KEY}"
+      PUBLIC_BASE_URL: "http://localhost:8000"
+      REQUEST_TIMEOUT_SECONDS: "180"
+      IMAGE_TTL_SECONDS: "3600"
+      LOG_PROMPTS: "false"
+    restart: unless-stopped

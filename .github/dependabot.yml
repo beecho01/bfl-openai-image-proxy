@@ -1,0 +1,34 @@
+version: 2
+updates:
+  # Python dependencies in requirements.txt
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps:"
+    groups:
+      # Group patch-only updates together to reduce PR noise
+      patch-and-minor:
+        update-types:
+          - "patch"
+          - "minor"
+    # Require explicit review for major version bumps
+    # (no auto-merge config — humans review)
+
+  # GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "deps:"
