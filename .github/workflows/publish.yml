@@ -32,12 +32,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Generate date-based tag (YYYYMMDD.Iteration)
+        id: datetag
+        run: |
+          DATE=$(date -u +%Y%m%d)
+          echo "tag=${DATE}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "date=${DATE}" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
+            # YYYYMMDD.Iteration (e.g. 20260628.1) on every push to main
+            type=raw,value=${{ steps.datetag.outputs.tag }},enable={{is_default_branch}}
             # latest tag on main branch pushes
             type=raw,value=latest,enable={{is_default_branch}}
             # branch name (e.g. main)
@@ -46,8 +55,6 @@ jobs:
             type=semver,pattern={{version}}
             # major.minor (e.g. v1.0.0 -> 1.0)
             type=semver,pattern={{major}}.{{minor}}
-            # major (e.g. v1.0.0 -> 1)
-            type=semver,pattern={{major}}
             # short SHA for every push
             type=sha,prefix=sha-,format=short
 

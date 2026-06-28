@@ -67,7 +67,7 @@ Optional (see `.env.example` for full list and defaults):
 
 ## Build and run with Docker Compose
 
-The Dockerfile uses the [Chainguard](https://hub.docker.com/r/chainguard/python) hardened `python:3.12` base image — minimal, non-root by default, and patched quickly for CVEs. If you prefer the standard Debian-based image, swap the `FROM` line for `python:3.12-slim` and restore the `groupadd`/`useradd` block.
+The Dockerfile uses `python:3.12-slim` with a non-root user and a healthcheck. If you prefer the [Chainguard](https://hub.docker.com/r/chainguard/python) hardened image, swap the `FROM` line for `chainguard/python:latest` (ships Python 3.14) and drop the `groupadd`/`useradd` block — but verify dependency compatibility first.
 
 ### Option A: Use the prebuilt image from ghcr.io
 
@@ -82,8 +82,9 @@ Tags available:
 | Tag | When |
 |-----|------|
 | `latest` | Latest push to `main` |
+| `YYYYMMDD.Iteration` (e.g. `20260628.1`) | Every push to `main` (date + GitHub run number) |
 | `main` | Latest push to `main` (branch alias) |
-| `1.0.0`, `1.0`, `1` | From git tag `v1.0.0` |
+| `1.0.0`, `1.0` | From git tag `v1.0.0` |
 | `sha-<short>` | Every push (by commit SHA) |
 
 Use it in your compose file by replacing `build: .` with `image: ghcr.io/beecho01/bfl-openai-image-proxy:latest`.

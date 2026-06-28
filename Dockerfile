@@ -1,6 +1,7 @@
-# Chainguard hardened Python image: minimal, non-root by default, fast CVE patching.
-# Pin by digest in production for reproducibility.
-FROM chainguard/python:3.12
+# Python 3.12 slim base. Runs as a non-root user with a minimal footprint.
+# To use the Chainguard hardened image instead, use `FROM chainguard/python:latest`
+# (ships Python 3.14) and drop the useradd block — but verify dependency compat first.
+FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -8,18 +9,16 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install deps as root (builder), then drop back to the built-in nonroot user.
-USER root
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
-# Create the generated-image dir and hand it to the nonroot user (UID 65532).
-RUN mkdir -p /tmp/bfl-openai-image-proxy/generated \
-    && chown -R nonroot:nonroot /tmp/bfl-openai-image-proxy /app
+RUN groupadd -r appuser && useradd -r -g appuser appuser \
+    && mkdir -p /tmp/bfl-openai-image-proxy/generated \
+    && chown -R appuser:appuser /tmp/bfl-openai-image-proxy /app
 
-USER nonroot
+USER appuser
 
 EXPOSE 8000
 
