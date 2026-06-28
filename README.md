@@ -1,4 +1,4 @@
-# bfl-openai-image-proxy
+# Black Forest Labs to OpenAI Image Generation Proxy
 
 A small OpenAI-compatible image generation proxy for [Open WebUI](https://github.com/open-webui/open-webui). It exposes an OpenAI-style image generation endpoint, translates requests into [Black Forest Labs FLUX](https://docs.bfl.ml/) API calls, polls BFL until generation is complete, then returns an OpenAI-compatible image response.
 
