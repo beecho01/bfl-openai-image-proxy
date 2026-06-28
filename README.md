@@ -69,6 +69,27 @@ Optional (see `.env.example` for full list and defaults):
 
 The Dockerfile uses the [Chainguard](https://hub.docker.com/r/chainguard/python) hardened `python:3.12` base image — minimal, non-root by default, and patched quickly for CVEs. If you prefer the standard Debian-based image, swap the `FROM` line for `python:3.12-slim` and restore the `groupadd`/`useradd` block.
 
+### Option A: Use the prebuilt image from ghcr.io
+
+A multi-arch image (amd64 + arm64) is published to the GitHub Container Registry on every push to `main` and on every version tag:
+
+```bash
+docker pull ghcr.io/beecho01/bfl-openai-image-proxy:latest
+```
+
+Tags available:
+
+| Tag | When |
+|-----|------|
+| `latest` | Latest push to `main` |
+| `main` | Latest push to `main` (branch alias) |
+| `1.0.0`, `1.0`, `1` | From git tag `v1.0.0` |
+| `sha-<short>` | Every push (by commit SHA) |
+
+Use it in your compose file by replacing `build: .` with `image: ghcr.io/beecho01/bfl-openai-image-proxy:latest`.
+
+### Option B: Build from source
+
 ```bash
 export BFL_API_KEY="your-bfl-api-key"
 export PROXY_API_KEY="choose-a-proxy-secret"
