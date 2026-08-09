@@ -5,10 +5,10 @@
     <img src="images/logo.png" alt="Logo" width="80" height="80">
   </a> -->
 
-<h3 align="center">Black Forest Labs FLUX to OpenAI Image Generation API Proxy</h3>
+<h3 align="center">Black Forest Labs FLUX to OpenAI Image Generation & Editing API Proxy</h3>
 
   <p align="center">
-    A small OpenAI-compatible image generation proxy for Open WebUI. It exposes an OpenAI-style image generation endpoint, translates requests into Black Forest Labs FLUX API calls, polls BFL until generation is complete, then returns an OpenAI-compatible image response.
+    An OpenAI-compatible image generation and editing proxy for Open WebUI. It exposes OpenAI-style endpoints, translates requests into Black Forest Labs FLUX API calls, polls BFL until generation is complete, then returns an OpenAI-compatible image response.
     <br />
     <a href="https://github.com/beecho01/bfl-openai-image-proxy"><strong>Explore the docs »</strong></a>
     <br />
@@ -85,27 +85,52 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-A small OpenAI-compatible image generation proxy for [Open WebUI](https://github.com/open-webui/open-webui). It exposes an OpenAI-style image generation endpoint, translates requests into [Black Forest Labs FLUX](https://docs.bfl.ml/) API calls, polls BFL until generation is complete, then returns an OpenAI-compatible image response.
+An OpenAI-compatible image generation and editing proxy for [Open WebUI](https://github.com/open-webui/open-webui). It exposes OpenAI-style endpoints, translates requests into [Black Forest Labs FLUX](https://docs.bfl.ai/) API calls, polls BFL until generation is complete, then returns an OpenAI-compatible image response.
+
+The proxy supports both **text-to-image generation** (`POST /v1/images/generations`) and **image editing** (`POST /v1/images/edits`), covering the full range of FLUX.2, FLUX.1, and FLUX Tools models available through the BFL API.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 ### Scope
 
-This proxy is **text-to-image generation only**. It supports the FLUX generation endpoints (`POST /v1/{model}` with a prompt) and the async poll/retrieve flow.
+This proxy supports:
 
-It does **not** support BFL's editing, out-painting, in-painting, erasure, de-blur, virtual try-on, fine-tune management, or FLUX Tools endpoints. Open WebUI's OpenAI image generation engine only performs generation, so this matches its use case exactly.
+- **Text-to-image generation** via `POST /v1/images/generations` — all FLUX generation endpoints
+- **Image editing** via `POST /v1/images/edits` — context-aware editing, inpainting, outpainting, object erasure, deblur, and virtual try-on
+- The async poll/retrieve flow used by all BFL endpoints
+
+It does **not** support BFL's fine-tune management endpoints, FLUX 3 video generation (different API shape), or the FLUX 3 Action model. These may be added in future versions.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 ### What the Proxy Does
 
-- Exposes `POST /v1/images/generations` (OpenAI-compatible).
-- Exposes `GET /v1/models` listing supported FLUX models.
-- Exposes `GET /health` for health checks.
+#### Image Generation (`POST /v1/images/generations`)
+
 - Translates OpenAI-style `size` (e.g. `1024x1024`) into BFL `width`/`height`.
 - Submits to BFL `POST {BFL_BASE_URL}/v1/{model}`, polls the returned `polling_url` until `status == "Ready"`, then downloads `result.sample`.
-- Downloads the generated image **immediately** when ready — BFL's signed `result.sample` URLs expire after 10 minutes, so the proxy fetches the bytes straight away and never exposes the short-lived URL to the client.
 - Returns either `b64_json` (default) or `url` response format.
+
+#### Image Editing (`POST /v1/images/edits`)
+
+- Accepts a base64-encoded source image, a text prompt, and optionally a base64-encoded mask.
+- Automatically adapts the BFL API payload shape based on the target model:
+  - **FLUX.2 models** (`flux-2-max`, `flux-2-pro`, `flux-2-flex`, `flux-2-pro-preview`): sends `input_image` + `prompt` + `width` + `height`
+  - **FLUX Kontext models** (`flux-kontext-pro`, `flux-kontext-max`): sends `input_image` + `prompt` (uses aspect ratio, not explicit dimensions)
+  - **FLUX Tools erase**: sends `image` + `mask` (no prompt)
+  - **FLUX Tools deblur**: sends `image` only (no prompt, no mask)
+  - **FLUX Tools outpainting**: sends `input_image` + `width` + `height` + optional `prompt`
+  - **FLUX Tools VTO** (virtual try-on): sends `person` + `garment` + `prompt`
+  - **FLUX.1 Fill** (inpainting): sends `image` + `mask` + `prompt`
+  - **FLUX.1 Expand**: sends `image` + `prompt`
+- Strips `data:` URI prefixes from base64 image data (Open WebUI sends these).
+- All editing model defaults are configurable via environment variables.
+
+#### General
+
+- Exposes `GET /v1/models` listing all supported FLUX models.
+- Exposes `GET /health` for health checks.
+- Downloads the generated image **immediately** when ready — BFL's signed `result.sample` URLs expire after 10 minutes, so the proxy fetches the bytes straight away and never exposes the short-lived URL to the client.
 - Supports friendly model aliases (e.g. `black-forest-labs/FLUX.2-klein-9B`).
 - Optional bearer auth for the proxy.
 - Privacy-first: no prompts, images, or API keys are logged by default.
@@ -115,7 +140,7 @@ It does **not** support BFL's editing, out-painting, in-painting, erasure, de-bl
 
 ### How the Proxy Handles BFL's 10-Minute Signed URL Expiry
 
-BFL's `result.sample` is a signed URL that is **only valid for 10 minutes** after generation completes (see the [FLUX.2 text-to-image docs](https://docs.bfl.ml/flux_2/flux2_text_to_image)). The proxy is designed around this constraint:
+BFL's `result.sample` is a signed URL that is **only valid for 10 minutes** after generation completes (see the [FLUX.2 text-to-image docs](https://docs.bfl.ai/)). The proxy is designed around this constraint:
 
 - When polling reports `status == "Ready"`, the proxy **downloads the image bytes immediately** from `result.sample` using the same `x-key` header.
 - For `response_format=b64_json` (the default), the bytes are base64-encoded and returned inline in the OpenAI response — no URL is exposed to the client, so the 10-minute expiry is irrelevant.
@@ -144,7 +169,7 @@ To get a local copy up and running follow these simple steps.
 
 ### Prerequisites
 
-- A [Black Forest Labs API key](https://docs.bfl.ml/)
+- A [Black Forest Labs API key](https://docs.bfl.ai/)
 - Docker and Docker Compose (recommended), or Python 3.11+ if running directly
 
 ### Installation
@@ -171,7 +196,7 @@ Use it in your compose file by replacing `build: .` with `image: ghcr.io/beecho0
 
 #### Option B: Build from source
 
-1. Get a BFL API key at [https://docs.bfl.ml/](https://docs.bfl.ml/)
+1. Get a BFL API key at [https://docs.bfl.ai/](https://docs.bfl.ai/)
 2. Clone the repo
 
    ```bash
@@ -246,6 +271,50 @@ curl -X POST "http://localhost:8000/v1/images/generations" \
   }'
 ```
 
+Edit an image (context-aware editing with FLUX.2):
+
+```bash
+curl -X POST "http://localhost:8000/v1/images/edits" \
+  -H "Authorization: Bearer ${PROXY_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "flux-2-pro-preview",
+    "prompt": "add floral wallpaper to this wall",
+    "image": "<base64-encoded-image>",
+    "size": "1024x1024",
+    "response_format": "b64_json"
+  }'
+```
+
+Edit an image with FLUX Kontext:
+
+```bash
+curl -X POST "http://localhost:8000/v1/images/edits" \
+  -H "Authorization: Bearer ${PROXY_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "flux-kontext-pro",
+    "prompt": "remove the person in the background",
+    "image": "<base64-encoded-image>",
+    "response_format": "b64_json"
+  }'
+```
+
+Inpaint with a mask (FLUX.1 Fill):
+
+```bash
+curl -X POST "http://localhost:8000/v1/images/edits" \
+  -H "Authorization: Bearer ${PROXY_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "flux-pro-1.0-fill",
+    "prompt": "replace the scratched area with clear paint",
+    "image": "<base64-encoded-image>",
+    "mask": "<base64-encoded-mask>",
+    "response_format": "b64_json"
+  }'
+```
+
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 <!-- IMAGE SIZES -->
@@ -257,6 +326,7 @@ Unlike OpenAI's DALL-E (which only accepts `1024x1024`, `1024x1792`, `1792x1024`
 - Both `x` and `*` separators are accepted (e.g. `1024*1024`).
 - The FLUX.2 family supports outputs up to ~4 megapixels (e.g. `2048x2048`). Older FLUX.1 models have different limits. BFL returns a `422` validation error if you exceed a model's maximum, which the proxy surfaces as an OpenAI-style error.
 - In Open WebUI, set `IMAGE_SIZE` to any valid dimensions (e.g. `IMAGE_SIZE=1440x2048`).
+- For FLUX Kontext models, explicit width/height are not used — the model uses aspect ratio instead.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -274,6 +344,15 @@ IMAGE_GENERATION_MODEL=flux-2-klein-9b-preview
 IMAGE_SIZE=1024x1024
 ```
 
+To enable image editing in Open WebUI:
+
+```
+ENABLE_IMAGE_EDIT=true
+IMAGE_EDIT_ENGINE=openai
+IMAGES_EDIT_OPENAI_API_BASE_URL=http://bfl-openai-image-proxy:8000/v1
+IMAGES_EDIT_OPENAI_API_KEY=<PROXY_API_KEY>
+```
+
 If Open WebUI runs in the same Docker network as the proxy, use the container name `bfl-openai-image-proxy` as the host. Otherwise, use the host/port where the proxy is reachable.
 
 ### Run alongside Open WebUI in a single Docker Compose stack
@@ -283,9 +362,7 @@ Drop the following into a `docker-compose.yml` alongside your Open WebUI deploym
 ```yaml
 services:
   bfl-openai-image-proxy:
-    build: ./bfl-openai-image-proxy
-    # or use a prebuilt image:
-    # image: ghcr.io/beecho01/bfl-openai-image-proxy:latest
+    image: ghcr.io/beecho01/bfl-openai-image-proxy:latest
     container_name: bfl-openai-image-proxy
     restart: unless-stopped
     environment:
@@ -297,6 +374,15 @@ services:
       REQUEST_TIMEOUT_SECONDS: "180"
       IMAGE_TTL_SECONDS: "3600"
       LOG_PROMPTS: "false"
+      # Image editing model defaults
+      DEFAULT_EDIT_MODEL: "flux-2-pro-preview"
+      EDIT_MODEL_KONTEXT: "flux-kontext-pro"
+      EDIT_MODEL_FLUX2: "flux-2-pro-preview"
+      EDIT_MODEL_INPAINT: "flux-pro-1.0-fill"
+      EDIT_MODEL_OUTPAINT: "flux-tools/outpainting-v1"
+      EDIT_MODEL_ERASE: "flux-tools/erase-v1"
+      EDIT_MODEL_DEBLUR: "flux-tools/deblur-v1"
+      EDIT_MODEL_VTO: "flux-tools/vto-v2"
     # No port mapping needed if only Open WebUI needs to reach it.
     # Expose to the host only if you also want to test from outside the stack:
     # ports:
@@ -337,7 +423,7 @@ Then bring up the whole stack:
 docker compose up -d --build
 ```
 
-Open WebUI will be available at `http://localhost:3000` and will use the proxy for image generation. The proxy is only reachable from within the Docker network (Open WebUI reaches it at `http://bfl-openai-image-proxy:8000`); uncomment the `ports` block on the proxy if you also want to test it directly from the host.
+Open WebUI will be available at `http://localhost:3000` and will use the proxy for image generation and editing. The proxy is only reachable from within the Docker network (Open WebUI reaches it at `http://bfl-openai-image-proxy:8000`); uncomment the `ports` block on the proxy if you also want to test it directly from the host.
 
 > **Note on `PUBLIC_BASE_URL`:** when `response_format=url` is used, the proxy returns image URLs that Open WebUI's browser must be able to fetch. If Open WebUI and the proxy are in the same Docker network but the user's browser is outside it, set `PUBLIC_BASE_URL` to a URL the browser can reach (e.g. `http://localhost:8000` if you expose the proxy port, or your reverse-proxy host). For `response_format=b64_json` (the default), this is not a concern because the image data is embedded in the response.
 
@@ -346,21 +432,72 @@ Open WebUI will be available at `http://localhost:3000` and will use the proxy f
 <!-- SUPPORTED MODELS -->
 ## Supported Models
 
-- `flux-2-max`
-- `flux-2-pro-preview`
-- `flux-2-pro`
-- `flux-2-flex`
-- `flux-2-klein-4b`
-- `flux-2-klein-9b-preview`
-- `flux-2-klein-9b`
-- `flux-kontext-max`
-- `flux-kontext-pro`
-- `flux-pro-1.1-ultra`
-- `flux-pro-1.1`
-- `flux-pro`
-- `flux-dev`
+### Text-to-Image Generation (`POST /v1/images/generations`)
+
+All models below accept a text `prompt` and `size` parameter.
+
+#### FLUX.2 (latest generation)
+
+| Model | BFL Endpoint | Description |
+|-------|-------------|-------------|
+| `flux-2-max` | `/v1/flux-2-max` | Top-tier quality, most capable FLUX.2 variant |
+| `flux-2-pro-preview` | `/v1/flux-2-pro-preview` | Latest FLUX.2 [pro] — preview endpoint (recommended starting point) |
+| `flux-2-pro` | `/v1/flux-2-pro` | Fixed snapshot of FLUX.2 [pro] for reproducibility |
+| `flux-2-flex` | `/v1/flux-2-flex` | Flexible FLUX.2 variant with configurable steps/guidance |
+| `flux-2-klein-4b` | `/v1/flux-2-klein-4b` | Fast, lightweight FLUX.2 [klein] 4B |
+| `flux-2-klein-9b-preview` | `/v1/flux-2-klein-9b-preview` | Latest FLUX.2 [klein] 9B with KV caching (preview) |
+| `flux-2-klein-9b` | `/v1/flux-2-klein-9b` | Fixed snapshot of FLUX.2 [klein] 9B for reproducibility |
+
+#### FLUX.1 Kontext (image editing)
+
+| Model | BFL Endpoint | Description |
+|-------|-------------|-------------|
+| `flux-kontext-max` | `/v1/flux-kontext-max` | Higher quality Kontext editing |
+| `flux-kontext-pro` | `/v1/flux-kontext-pro` | Standard Kontext editing |
+
+#### FLUX.1 (legacy generation)
+
+| Model | BFL Endpoint | Description |
+|-------|-------------|-------------|
+| `flux-pro-1.1-ultra` | `/v1/flux-pro-1.1-ultra` | Ultra high-resolution (4MP) generation |
+| `flux-pro-1.1` | `/v1/flux-pro-1.1` | Fast, high-quality generation |
+| `flux-pro` | `/v1/flux-pro` | Original FLUX.1 [pro] |
+| `flux-dev` | `/v1/flux-dev` | Open-weight development model |
+
+### Image Editing (`POST /v1/images/edits`)
+
+The following models accept a base64-encoded source `image` and a text `prompt`. Some require additional fields:
+
+| Model | BFL Endpoint | Requires | Description |
+|-------|-------------|----------|-------------|
+| `flux-2-max` | `/v1/flux-2-max` | image + prompt | FLUX.2 [max] context-aware editing (recommended) |
+| `flux-2-pro-preview` | `/v1/flux-2-pro-preview` | image + prompt | FLUX.2 [pro] context-aware editing (recommended default) |
+| `flux-2-pro` | `/v1/flux-2-pro` | image + prompt | FLUX.2 [pro] fixed snapshot editing |
+| `flux-2-flex` | `/v1/flux-2-flex` | image + prompt | FLUX.2 [flex] editing with configurable steps/guidance |
+| `flux-kontext-pro` | `/v1/flux-kontext-pro` | image + prompt | FLUX.1 Kontext [pro] — natural language image editing |
+| `flux-kontext-max` | `/v1/flux-kontext-max` | image + prompt | FLUX.1 Kontext [max] — higher quality editing |
+| `flux-pro-1.0-fill` | `/v1/flux-pro-1.0-fill` | image + mask + prompt | Inpainting — modify masked region |
+| `flux-pro-1.0-fill-finetuned` | `/v1/flux-pro-1.0-fill-finetuned` | image + mask + prompt | Inpainting with a finetuned LoRA |
+| `flux-pro-1.0-expand` | `/v1/flux-pro-1.0-expand` | image + prompt | Outpainting — expand image borders |
+| `flux-tools/outpainting-v1` | `/v1/flux-tools/outpainting-v1` | image + size | FLUX Tools outpainting |
+| `flux-tools/erase-v1` | `/v1/flux-tools/erase-v1` | image + mask | Object removal (no prompt needed) |
+| `flux-tools/deblur-v1` | `/v1/flux-tools/deblur-v1` | image only | Sharpen blurry images (no prompt needed) |
+| `flux-tools/vto-v1` | `/v1/flux-tools/vto-v1` | person + garment + prompt | Virtual try-on v1 |
+| `flux-tools/vto-v2` | `/v1/flux-tools/vto-v2` | person + garment + prompt | Virtual try-on v2 (up to 4MP) |
+
+### FLUX 3 (listed for completeness)
+
+| Model | BFL Endpoint | Description |
+|-------|-------------|-------------|
+| `flux-3-video` | `/v1/flux-3-video` | FLUX 3 multimodal — video with audio (different API shape, not yet integrated for image generation) |
+
+> **Note:** FLUX 3 Image is announced but not yet available via the BFL API. Only FLUX 3 Video is live.
+
+### Friendly Aliases
 
 Friendly aliases are also accepted, e.g. `black-forest-labs/FLUX.2-klein-9B` → `flux-2-klein-9b`.
+
+See the [BFL API documentation](https://docs.bfl.ai/) for the full list of available models and their parameters.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -375,12 +512,12 @@ Required:
 |----------|-------------|
 | `BFL_API_KEY` | Your Black Forest Labs API key. |
 
-Optional (see `.env.example` for full list and defaults):
+Optional — Generation:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BFL_BASE_URL` | `https://api.eu.bfl.ai` | BFL API base URL. Other options: `https://api.bfl.ai` (global), `https://api.us.bfl.ai`. |
-| `DEFAULT_MODEL` | `flux-2-klein-9b-preview` | Model used when the client doesn't specify one. |
+| `DEFAULT_MODEL` | `flux-2-klein-9b-preview` | Model used when the client doesn't specify one for generation. |
 | `PROXY_API_KEY` | _(unset)_ | If set, clients must send `Authorization: Bearer <PROXY_API_KEY>`. If unset, unauthenticated access is allowed (a warning is logged at start-up). |
 | `PUBLIC_BASE_URL` | _(inferred)_ | Base URL used for returned image URLs when `response_format=url`. If unset, inferred from request headers. |
 | `POLL_INTERVAL_SECONDS` | `0.5` | Seconds between BFL polling requests. |
@@ -392,6 +529,21 @@ Optional (see `.env.example` for full list and defaults):
 | `BFL_PASS_THROUGH_EXTRA_PARAMS` | `false` | Forward unknown request fields to BFL. |
 | `STORE_GENERATED_IMAGES` | `false` | Persist generated images beyond TTL cleanup. |
 | `GENERATED_DIR` | `/tmp/bfl-openai-image-proxy/generated` | Directory for generated image files. |
+
+Optional — Image Editing:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEFAULT_EDIT_MODEL` | `flux-2-pro-preview` | Default model for `/v1/images/edits` when the client doesn't specify one. |
+| `EDIT_MODEL_KONTEXT` | `flux-kontext-pro` | Default for Kontext-style editing (image + prompt, no mask). |
+| `EDIT_MODEL_FLUX2` | `flux-2-pro-preview` | Default for FLUX.2 multi-image editing. |
+| `EDIT_MODEL_INPAINT` | `flux-pro-1.0-fill` | Default for inpainting (image + mask + prompt). |
+| `EDIT_MODEL_OUTPAINT` | `flux-tools/outpainting-v1` | Default for outpainting / image expansion. |
+| `EDIT_MODEL_ERASE` | `flux-tools/erase-v1` | Default for object erasure (image + mask, no prompt). |
+| `EDIT_MODEL_DEBLUR` | `flux-tools/deblur-v1` | Default for deblur (image only, no prompt). |
+| `EDIT_MODEL_VTO` | `flux-tools/vto-v2` | Default for virtual try-on (person + garment images). |
+
+All editing model variables are configurable so you can update model names without code changes if BFL releases new models or renames existing ones.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -420,7 +572,8 @@ CI runs the test suite across Python 3.11, 3.12, and 3.13, plus a Docker build s
 <!-- ROADMAP -->
 ## Roadmap
 
-- [ ] Add support for BFL FLUX.2 additional parameters as they're released
+- [ ] Add support for FLUX 3 Image when available via BFL API
+- [ ] Add support for FLUX 3 Video generation (different API shape)
 - [ ] Add request/response examples to OpenAPI docs
 - [ ] Add optional Prometheus metrics endpoint
 - [ ] Multi-language Support
@@ -444,7 +597,7 @@ If you have a suggestion that would make this better, please fork the repo and c
 4. Push to the Branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-Please ensure `python -m pytest -q` passes before submitting. Keep the proxy's scope (text-to-image generation only), privacy guarantees, and OpenAI-compatible contract intact.
+Please ensure `python -m pytest -q` passes before submitting. Keep the proxy's OpenAI-compatible contract and privacy guarantees intact.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -465,7 +618,7 @@ Project Link: [https://github.com/beecho01/bfl-openai-image-proxy](https://githu
 <!-- ACKNOWLEDGMENTS -->
 ## Acknowledgments
 
-- [Black Forest Labs FLUX](https://docs.bfl.ml/) — the underlying image generation API
+- [Black Forest Labs FLUX](https://docs.bfl.ai/) — the underlying image generation and editing API
 - [Open WebUI](https://github.com/open-webui/open-webui) — the OpenAI-compatible UI this proxy serves
 - [FastAPI](https://fastapi.tiangolo.com/) — the async web framework
 - [httpx](https://www.python-httpx.org/) — the async HTTP client

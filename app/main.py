@@ -1,4 +1,4 @@
-"""FastAPI application: OpenAI-compatible image generation proxy for BFL FLUX."""
+"""FastAPI application: OpenAI-compatible image generation and editing proxy for BFL FLUX."""
 import asyncio
 import base64
 import logging
@@ -15,7 +15,13 @@ from .config import get_settings
 from .errors import BflProxyError, bfl_proxy_exception_handler, error_response
 from .models import (
     SUPPORTED_MODELS,
+    EDITING_CAPABLE_MODELS,
+    MASK_REQUIRED_MODELS,
+    NO_PROMPT_MODELS,
+    VTO_MODELS,
+    INPUT_IMAGE_FIELD_MODELS,
     ImageData,
+    ImageEditRequest,
     ImageGenerationRequest,
     ImageGenerationResponse,
     ModelInfo,
@@ -72,6 +78,21 @@ def parse_size(size: str) -> Tuple[int, int]:
 
 
 # ---------------------------------------------------------------------------
+# Image base64 helpers
+# ---------------------------------------------------------------------------
+
+
+def strip_data_uri_prefix(b64: str) -> str:
+    """Remove data URI prefix (e.g. 'data:image/png;base64,...') if present."""
+    if b64 and b64.startswith("data:"):
+        # Find the first comma and take everything after it
+        idx = b64.find(",")
+        if idx > 0:
+            return b64[idx + 1:]
+    return b64
+
+
+# ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
 
@@ -86,8 +107,8 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="bfl-openai-image-proxy",
-        version="1.0.0",
-        description="OpenAI-compatible image generation proxy for Black Forest Labs FLUX.",
+        version="2.0.0",
+        description="OpenAI-compatible image generation and editing proxy for Black Forest Labs FLUX.",
     )
     app.add_middleware(
         CORSMiddleware,
@@ -175,6 +196,208 @@ def create_app() -> FastAPI:
                     payload[k] = v
         return payload
 
+    def build_edit_payload(
+        req: ImageEditRequest,
+        model: str,
+        width: int,
+        height: int,
+    ) -> Dict[str, Any]:
+        """Build a BFL API payload for image editing, adapting to the model's schema."""
+        image_b64 = strip_data_uri_prefix(req.image) if req.image else None
+        mask_b64 = strip_data_uri_prefix(req.mask) if req.mask else None
+
+        payload: Dict[str, Any] = {}
+
+        # --- Determine payload shape based on model ---
+
+        # VTO models: person + garment images
+        if model in VTO_MODELS:
+            if not image_b64:
+                raise BflProxyError(
+                    "Virtual try-on requires a person image.",
+                    type="invalid_request_error",
+                    code="missing_image",
+                    status_code=400,
+                )
+            payload["person"] = image_b64
+            # Use mask as garment image if provided (OpenAI edit API has no garment field)
+            if mask_b64:
+                payload["garment"] = mask_b64
+            if req.prompt:
+                payload["prompt"] = req.prompt
+            if req.seed is not None:
+                payload["seed"] = req.seed
+            if req.safety_tolerance is not None:
+                payload["safety_tolerance"] = req.safety_tolerance
+            if req.output_format is not None:
+                payload["output_format"] = req.output_format
+            return payload
+
+        # FLUX Tools outpainting: input_image + width + height
+        if model == "flux-tools/outpainting-v1":
+            if not image_b64:
+                raise BflProxyError(
+                    "Outpainting requires an input image.",
+                    type="invalid_request_error",
+                    code="missing_image",
+                    status_code=400,
+                )
+            payload["input_image"] = image_b64
+            payload["width"] = width
+            payload["height"] = height
+            if req.prompt:
+                payload["prompt"] = req.prompt
+            if req.safety_tolerance is not None:
+                payload["safety_tolerance"] = req.safety_tolerance
+            if req.output_format is not None:
+                payload["output_format"] = req.output_format
+            return payload
+
+        # FLUX Tools erase: image + mask (no prompt)
+        if model == "flux-tools/erase-v1":
+            if not image_b64:
+                raise BflProxyError(
+                    "Erase requires an input image.",
+                    type="invalid_request_error",
+                    code="missing_image",
+                    status_code=400,
+                )
+            if not mask_b64:
+                raise BflProxyError(
+                    "Erase requires a mask image.",
+                    type="invalid_request_error",
+                    code="missing_mask",
+                    status_code=400,
+                )
+            payload["image"] = image_b64
+            payload["mask"] = mask_b64
+            if req.seed is not None:
+                payload["seed"] = req.seed
+            if req.safety_tolerance is not None:
+                payload["safety_tolerance"] = req.safety_tolerance
+            if req.output_format is not None:
+                payload["output_format"] = req.output_format
+            return payload
+
+        # FLUX Tools deblur: image only (no prompt, no mask)
+        if model == "flux-tools/deblur-v1":
+            if not image_b64:
+                raise BflProxyError(
+                    "Deblur requires an input image.",
+                    type="invalid_request_error",
+                    code="missing_image",
+                    status_code=400,
+                )
+            payload["image"] = image_b64
+            if req.seed is not None:
+                payload["seed"] = req.seed
+            if req.safety_tolerance is not None:
+                payload["safety_tolerance"] = req.safety_tolerance
+            if req.output_format is not None:
+                payload["output_format"] = req.output_format
+            return payload
+
+        # FLUX.1 Fill (inpainting): image + mask + prompt
+        if model in ("flux-pro-1.0-fill", "flux-pro-1.0-fill-finetuned"):
+            if not image_b64:
+                raise BflProxyError(
+                    "Inpainting requires an input image.",
+                    type="invalid_request_error",
+                    code="missing_image",
+                    status_code=400,
+                )
+            payload["image"] = image_b64
+            if mask_b64:
+                payload["mask"] = mask_b64
+            if req.prompt:
+                payload["prompt"] = req.prompt
+            if req.seed is not None:
+                payload["seed"] = req.seed
+            if req.guidance is not None:
+                payload["guidance"] = req.guidance
+            if req.safety_tolerance is not None:
+                payload["safety_tolerance"] = req.safety_tolerance
+            if req.output_format is not None:
+                payload["output_format"] = req.output_format
+            return payload
+
+        # FLUX.1 Expand (outpainting with pixel directions): image + prompt
+        if model == "flux-pro-1.0-expand":
+            if not image_b64:
+                raise BflProxyError(
+                    "Expand requires an input image.",
+                    type="invalid_request_error",
+                    code="missing_image",
+                    status_code=400,
+                )
+            payload["image"] = image_b64
+            if req.prompt:
+                payload["prompt"] = req.prompt
+            if req.seed is not None:
+                payload["seed"] = req.seed
+            if req.guidance is not None:
+                payload["guidance"] = req.guidance
+            if req.safety_tolerance is not None:
+                payload["safety_tolerance"] = req.safety_tolerance
+            if req.output_format is not None:
+                payload["output_format"] = req.output_format
+            return payload
+
+        # FLUX Kontext models: input_image + prompt (no width/height, uses aspect_ratio)
+        if model in INPUT_IMAGE_FIELD_MODELS:
+            if not image_b64:
+                raise BflProxyError(
+                    "Image editing requires an input image.",
+                    type="invalid_request_error",
+                    code="missing_image",
+                    status_code=400,
+                )
+            payload["input_image"] = image_b64
+            payload["prompt"] = req.prompt or ""
+            if req.seed is not None:
+                payload["seed"] = req.seed
+            if req.safety_tolerance is not None:
+                payload["safety_tolerance"] = req.safety_tolerance
+            if req.output_format is not None:
+                payload["output_format"] = req.output_format
+            return payload
+
+        # FLUX.2 models (flux-2-pro, flux-2-flex, flux-2-max, flux-2-pro-preview):
+        # These accept input_image + prompt + width + height
+        if model in EDITING_CAPABLE_MODELS:
+            if not image_b64:
+                raise BflProxyError(
+                    "Image editing requires an input image.",
+                    type="invalid_request_error",
+                    code="missing_image",
+                    status_code=400,
+                )
+            payload["input_image"] = image_b64
+            payload["prompt"] = req.prompt or ""
+            payload["width"] = width
+            payload["height"] = height
+            if req.seed is not None:
+                payload["seed"] = req.seed
+            if req.safety_tolerance is not None:
+                payload["safety_tolerance"] = req.safety_tolerance
+            if req.output_format is not None:
+                payload["output_format"] = req.output_format
+            return payload
+
+        # Fallback: treat as generic editing model
+        if image_b64:
+            payload["input_image"] = image_b64
+        payload["prompt"] = req.prompt or ""
+        payload["width"] = width
+        payload["height"] = height
+        if req.seed is not None:
+            payload["seed"] = req.seed
+        if req.safety_tolerance is not None:
+            payload["safety_tolerance"] = req.safety_tolerance
+        if req.output_format is not None:
+            payload["output_format"] = req.output_format
+        return payload
+
     async def generate_one(
         req: ImageGenerationRequest,
         model: str,
@@ -185,6 +408,30 @@ def create_app() -> FastAPI:
         payload = build_bfl_payload(req, model, width, height)
         task_id, polling_url = await bfl.submit(model, payload)
         logger.info("submitted bfl task id=%s model=%s", task_id, model)
+        sample_url = await bfl.poll_until_ready(polling_url)
+        image_bytes = await bfl.download_image(sample_url)
+
+        if req.response_format == "url":
+            ext = "png"
+            if req.output_format:
+                ext = req.output_format.lower()
+            filename = storage.save_image(image_bytes, ext=ext)
+            base = infer_public_base_url(request)
+            return ImageData(url=f"{base}/generated/{filename}")
+        # default b64_json
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        return ImageData(b64_json=b64)
+
+    async def edit_one(
+        req: ImageEditRequest,
+        model: str,
+        width: int,
+        height: int,
+        request: Request,
+    ) -> ImageData:
+        payload = build_edit_payload(req, model, width, height)
+        task_id, polling_url = await bfl.submit(model, payload)
+        logger.info("submitted bfl edit task id=%s model=%s", task_id, model)
         sample_url = await bfl.poll_until_ready(polling_url)
         image_bytes = await bfl.download_image(sample_url)
 
@@ -281,6 +528,89 @@ def create_app() -> FastAPI:
                 )
             duration = time.time() - start
             logger.info("image request complete model=%s n=%d duration=%.2fs", model, n, duration)
+
+        return ImageGenerationResponse(created=int(time.time()), data=list(images))
+
+    @app.post("/v1/images/edits", response_model=ImageGenerationResponse, response_model_exclude_none=True)
+    async def images_edits(
+        request: Request,
+        req: ImageEditRequest,
+        authorization: Optional[str] = Header(default=None),
+    ) -> ImageGenerationResponse:
+        await require_auth(authorization)
+
+        if not settings.bfl_api_key:
+            raise BflProxyError(
+                "BFL_API_KEY is not configured on the proxy.",
+                type="proxy_config_error",
+                code="missing_api_key",
+                status_code=500,
+            )
+
+        # Resolve model: use request model, or fall back to default_edit_model
+        try:
+            model = normalize_model(req.model, settings.default_edit_model)
+        except ValueError as exc:
+            raise BflProxyError(
+                str(exc),
+                type="invalid_request_error",
+                code="unsupported_model",
+                status_code=400,
+            )
+
+        # Validate prompt requirement
+        if model not in NO_PROMPT_MODELS:
+            if not req.prompt or not req.prompt.strip():
+                raise BflProxyError(
+                    "Missing required field: prompt.",
+                    type="invalid_request_error",
+                    code="missing_prompt",
+                    status_code=400,
+                )
+
+        # Validate image requirement (all editing needs an image)
+        if not req.image:
+            raise BflProxyError(
+                "Missing required field: image.",
+                type="invalid_request_error",
+                code="missing_image",
+                status_code=400,
+            )
+
+        width, height = parse_size(req.size)
+
+        n = max(1, min(req.n, 4))
+
+        if settings.log_prompts:
+            logger.info(
+                "image edit request model=%s size=%sx%s n=%d prompt=%r has_mask=%s",
+                model, width, height, n, req.prompt, bool(req.mask),
+            )
+        else:
+            logger.info(
+                "image edit request model=%s size=%sx%s n=%d has_mask=%s",
+                model, width, height, n, bool(req.mask),
+            )
+
+        async with semaphore:
+            start = time.time()
+            try:
+                tasks = [
+                    edit_one(req, model, width, height, request) for _ in range(n)
+                ]
+                images = await asyncio.gather(*tasks)
+            except BflProxyError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.error("unexpected error during image editing: %s", exc)
+                raise BflProxyError(
+                    f"Unexpected error: {exc}",
+                    type="internal_error",
+                    code="internal_error",
+                    status_code=500,
+                )
+            duration = time.time() - start
+            logger.info("image edit request complete model=%s n=%d duration=%.2fs", model, n, duration)
 
         return ImageGenerationResponse(created=int(time.time()), data=list(images))
 
