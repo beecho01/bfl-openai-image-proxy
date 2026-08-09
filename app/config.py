@@ -46,6 +46,31 @@ class Settings:
 
         self.generated_dir: str = os.environ.get("GENERATED_DIR", "/tmp/bfl-openai-image-proxy/generated")
 
+        # --- Image editing defaults (env-configurable in case BFL changes model names) ---
+        # Default model for general image editing (context-aware: "add wallpaper to my wall")
+        self.default_edit_model: str = os.environ.get("DEFAULT_EDIT_MODEL", "flux-2-pro-preview")
+
+        # Model for Kontext-style editing (image + prompt, no mask)
+        self.edit_model_kontext: str = os.environ.get("EDIT_MODEL_KONTEXT", "flux-kontext-pro")
+
+        # Model for FLUX.2 multi-image editing (image + prompt, up to 8 reference images)
+        self.edit_model_flux2: str = os.environ.get("EDIT_MODEL_FLUX2", "flux-2-pro-preview")
+
+        # Model for inpainting (image + mask + prompt)
+        self.edit_model_inpaint: str = os.environ.get("EDIT_MODEL_INPAINT", "flux-pro-1.0-fill")
+
+        # Model for outpainting / expand (image + direction + prompt)
+        self.edit_model_outpaint: str = os.environ.get("EDIT_MODEL_OUTPAINT", "flux-tools/outpainting-v1")
+
+        # Model for object erasure (image + mask, no prompt)
+        self.edit_model_erase: str = os.environ.get("EDIT_MODEL_ERASE", "flux-tools/erase-v1")
+
+        # Model for deblur (image only, no prompt)
+        self.edit_model_deblur: str = os.environ.get("EDIT_MODEL_DEBLUR", "flux-tools/deblur-v1")
+
+        # Model for virtual try-on (person image + garment image + prompt)
+        self.edit_model_vto: str = os.environ.get("EDIT_MODEL_VTO", "flux-tools/vto-v2")
+
 
 @lru_cache
 def get_settings() -> Settings:
