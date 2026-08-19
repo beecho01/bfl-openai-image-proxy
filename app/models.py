@@ -124,6 +124,13 @@ class ImageGenerationRequest(BaseModel):
     safety_tolerance: Optional[int] = None
     output_format: Optional[str] = None
     web_search: Optional[bool] = None
+    # FLUX.2 image editing / multi-reference (non-standard OpenAI extension).
+    # `input_image` is the primary reference image URL; `input_images` holds
+    # additional reference image URLs (mapped to BFL input_image_2..input_image_8).
+    # BFL accepts up to 8 reference images via API. Images must be publicly
+    # reachable URLs (BFL fetches them server-side).
+    input_image: Optional[str] = None
+    input_images: Optional[List[str]] = None
 
     model_config = {"extra": "allow"}
 

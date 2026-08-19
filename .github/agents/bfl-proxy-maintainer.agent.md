@@ -15,9 +15,9 @@ Triage and resolve end-user issues, fix bugs, keep dependencies and docs current
 
 ```
 app/
-  main.py        # FastAPI app: /health, /v1/models, /v1/images/generations, /generated/{filename}, size parsing, auth, concurrency
+  main.py        # FastAPI app: /health, /v1/models, /v1/images/generations, /generated/{filename}, size parsing, auth, concurrency, reference-image validation
   config.py      # env-driven Settings (lru_cache)
-  models.py      # Pydantic models, SUPPORTED_MODELS, MODEL_ALIASES, normalize_model()
+  models.py      # Pydantic models, SUPPORTED_MODELS, MODEL_ALIASES, normalize_model(), input_image/input_images fields
   bfl_client.py  # async httpx client: submit -> poll_until_ready -> download_image
   storage.py     # temp image storage + TTL cleanup background task
   errors.py      # BflProxyError + OpenAI-style error_response / handler
@@ -25,6 +25,7 @@ tests/
   test_size_parsing.py
   test_model_mapping.py
   test_openai_response_shape.py
+  test_image_editing.py
 Dockerfile                       # chainguard/python:3.12, non-root, healthcheck
 docker-compose.example.yml
 requirements.txt
@@ -34,7 +35,14 @@ README.md
 
 ## Scope guardrails
 
-This proxy is **text-to-image generation only**. It does NOT support BFL editing, out-painting, in-painting, erasure, de-blur, virtual try-on, fine-tune management, or FLUX Tools endpoints. If an issue requests any of those, **flag it as out of scope and ask for explicit approval before implementing** — do not silently expand scope, but do offer to implement if the user confirms they want to extend the proxy.
+This proxy supports **text-to-image generation** and **FLUX.2 image editing / multi-reference** (via the non-standard `input_image` / `input_images` request fields, mapped to BFL `input_image` and `input_image_2`…`input_image_8`). It uses the same `POST /v1/{model}` endpoint and poll/retrieve flow for both.
+
+It does **not** support BFL's out-painting, in-painting, erasure, de-blur, virtual try-on, fine-tune management, or FLUX Tools endpoints. If an issue requests any of those, **flag it as out of scope and ask for explicit approval before implementing** — do not silently expand scope, but do offer to implement if the user confirms they want to extend the proxy.
+
+Reference image input rules (enforced in `main.py`):
+- `input_image` (str) and `input_images` (list[str]) must be publicly reachable `http(s)` URLs — BFL fetches them server-side. No base64, no file uploads.
+- Total reference images (`input_image` + `input_images`) capped at **8** (BFL API limit). Exceeding → `400 too_many_reference_images`.
+- These are non-standard OpenAI extensions; Open WebUI's UI does not send them. The OpenAI-compatible request/response shapes are otherwise unchanged.
 
 ## Dependency policy
 
@@ -66,6 +74,9 @@ Do NOT proactively bump dependencies when fixing unrelated issues. Only touch `r
 
 - **422 / invalid size** → `parse_size` in `main.py`; BFL minimum is 64px per side, FLUX.2 max ~4MP.
 - **Unsupported model** → `normalize_model` / `SUPPORTED_MODELS` / `MODEL_ALIASES` in `models.py`. Check the BFL docs for new model endpoints before adding.
+- **400 too_many_reference_images** → request sent more than 8 reference images (`input_image` + `input_images`); BFL API limit is 8.
+- **400 invalid_reference_image** → `input_image` / `input_images` entry was not an `http(s)` URL; BFL fetches reference images server-side.
+- **422 from BFL on editing request** → reference image URL not publicly reachable, or model does not support editing (only FLUX.2 family supports `input_image`).
 - **401/403 from BFL** → `BFL_API_KEY` missing or wrong; surface as `upstream_unauthorized`.
 - **402 from BFL** → out of credits; surface as `out_of_credits`.
 - **429 from BFL** → 24 active tasks (6 for kontext-max); surface as `rate_limited`.

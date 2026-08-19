@@ -68,6 +68,7 @@
       </ul>
     </li>
     <li><a href="#usage">Usage</a></li>
+    <li><a href="#flux2-image-editing--multi-reference">FLUX.2 Image Editing &amp; Multi-Reference</a></li>
     <li><a href="#image-sizes">Image Sizes</a></li>
     <li><a href="#configure-open-webui">Configure Open WebUI</a></li>
     <li><a href="#supported-models">Supported Models</a></li>
@@ -95,7 +96,7 @@ The proxy supports both **text-to-image generation** (`POST /v1/images/generatio
 
 This proxy supports:
 
-- **Text-to-image generation** via `POST /v1/images/generations` — all FLUX generation endpoints
+- **Text-to-image generation** via `POST /v1/images/generations` — all FLUX generation endpoints, including non-standard `input_image` / `input_images` fields for FLUX.2 multi-reference generation (up to 8 reference image URLs)
 - **Image editing** via `POST /v1/images/edits` — context-aware editing, inpainting, outpainting, object erasure, deblur, and virtual try-on
 - The async poll/retrieve flow used by all BFL endpoints
 
@@ -132,6 +133,7 @@ It does **not** support BFL's fine-tune management endpoints, FLUX 3 video gener
 - Exposes `GET /health` for health checks.
 - Downloads the generated image **immediately** when ready — BFL's signed `result.sample` URLs expire after 10 minutes, so the proxy fetches the bytes straight away and never exposes the short-lived URL to the client.
 - Supports friendly model aliases (e.g. `black-forest-labs/FLUX.2-klein-9B`).
+- **FLUX.2 image editing / multi-reference**: accepts non-standard `input_image` (a single reference image URL) and `input_images` (a list of up to 7 additional reference image URLs) fields. These are mapped onto BFL's `input_image` and `input_image_2`…`input_image_8` parameters (up to 8 reference images via API). See [FLUX.2 Image Editing](#flux2-image-editing--multi-reference).
 - Optional bearer auth for the proxy.
 - Privacy-first: no prompts, images, or API keys are logged by default.
 - Temporary generated files are cleaned up automatically after a configurable TTL.
@@ -314,6 +316,62 @@ curl -X POST "http://localhost:8000/v1/images/edits" \
     "response_format": "b64_json"
   }'
 ```
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+<!-- FLUX.2 IMAGE EDITING -->
+## FLUX.2 Image Editing & Multi-Reference
+
+The FLUX.2 family (`flux-2-max`, `flux-2-pro`, `flux-2-pro-preview`, `flux-2-flex`, `flux-2-klein-4b`, `flux-2-klein-9b`, `flux-2-klein-9b-preview`) supports **image editing with text prompts and multi-reference input** — up to 8 reference images via the API. The proxy exposes this via two non-standard request fields on `POST /v1/images/generations`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `input_image` | `string` (URL) | The primary reference image. Mapped to BFL `input_image`. |
+| `input_images` | `array<string>` (URLs) | Up to 7 additional reference images. Mapped to BFL `input_image_2`…`input_image_8`. |
+
+Rules:
+
+- Reference images must be **publicly reachable `http(s)` URLs** — BFL fetches them server-side. The proxy does not accept base64 image data or file uploads.
+- The total number of reference images (`input_image` + `input_images`) is capped at **8** (BFL's API limit). Requests exceeding this return a `400` with `code: too_many_reference_images`.
+- These fields are **non-standard OpenAI extensions**. Open WebUI's image generation UI does not send them, so this feature is intended for direct API callers. The OpenAI-compatible request/response shapes are otherwise unchanged.
+- The same submit → poll → download flow and 10-minute signed URL handling apply. The proxy never exposes BFL's signed `result.sample` URL to the client.
+
+### Edit with a single reference image
+
+```bash
+curl -X POST "http://localhost:8000/v1/images/generations" \
+  -H "Authorization: Bearer ${PROXY_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "flux-2-pro-preview",
+    "prompt": "change the weather to a warm sunny day with clear blue sky",
+    "input_image": "https://example.com/forest-foggy.jpg",
+    "size": "1024x1024",
+    "response_format": "b64_json"
+  }'
+```
+
+### Edit with multiple reference images
+
+```bash
+curl -X POST "http://localhost:8000/v1/images/generations" \
+  -H "Authorization: Bearer ${PROXY_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "flux-2-pro-preview",
+    "prompt": "build a chicken coop from the materials in the reference images",
+    "input_image": "https://example.com/chickens.jpg",
+    "input_images": [
+      "https://example.com/wood.jpg",
+      "https://example.com/pillow.jpg",
+      "https://example.com/eggs.jpg"
+    ],
+    "size": "1024x1024",
+    "response_format": "b64_json"
+  }'
+```
+
+See the [FLUX.2 Image Editing docs](https://docs.bfl.ai/flux_2/flux2_image_editing) for capabilities and examples.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 

@@ -183,12 +183,25 @@ def create_app() -> FastAPI:
         if req.web_search is not None:
             payload["web_search"] = req.web_search
 
+        # FLUX.2 image editing / multi-reference images.
+        # BFL accepts input_image (primary) plus input_image_2..input_image_8
+        # (up to 8 reference images via API). We map the OpenAI-extension
+        # `input_image` (str) and `input_images` (list) onto those fields.
+        if req.input_image:
+            payload["input_image"] = req.input_image
+        if req.input_images:
+            # BFL fields are input_image_2 .. input_image_8 (7 additional slots)
+            for idx, img_url in enumerate(req.input_images, start=2):
+                if idx > 8:
+                    break
+                payload[f"input_image_{idx}"] = img_url
+
         # Extra fields pass-through
         if settings.bfl_pass_through_extra_params:
             known = {
                 "model", "prompt", "n", "size", "response_format", "user",
                 "quality", "style", "seed", "guidance", "safety_tolerance",
-                "output_format", "web_search",
+                "output_format", "web_search", "input_image", "input_images",
             }
             extras = req.model_dump().get("__pydantic_extra__", {}) or {}
             for k, v in extras.items():
@@ -501,6 +514,26 @@ def create_app() -> FastAPI:
             )
 
         width, height = parse_size(req.size)
+
+        # FLUX.2 image editing: validate reference images.
+        # BFL accepts up to 8 reference images via API (input_image +
+        # input_image_2..input_image_8). They must be publicly reachable URLs.
+        ref_count = (1 if req.input_image else 0) + (len(req.input_images) if req.input_images else 0)
+        if ref_count > 8:
+            raise BflProxyError(
+                "Too many reference images: BFL accepts up to 8 (input_image + input_images).",
+                type="invalid_request_error",
+                code="too_many_reference_images",
+                status_code=400,
+            )
+        for img_url in ([req.input_image] if req.input_image else []) + (req.input_images or []):
+            if not isinstance(img_url, str) or not img_url.strip().lower().startswith(("http://", "https://")):
+                raise BflProxyError(
+                    "Reference images must be publicly reachable http(s) URLs.",
+                    type="invalid_request_error",
+                    code="invalid_reference_image",
+                    status_code=400,
+                )
 
         n = max(1, min(req.n, 4))  # cap to 4 to limit abuse
 
